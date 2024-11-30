@@ -4,3 +4,6 @@ pillow
 matplotlib
 scipy
 scikit-image
+easyocr
+jaconv
+numpyencoder
