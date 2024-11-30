@@ -79,7 +79,7 @@ def get_strokes(raw_img):
 
     # Initialize array of stroke widths for each pixel
     h, w = raw_img.shape[:2]
-    stroke_widths = np.array([[np.Infinity, np.Infinity]])
+    stroke_widths = np.array([[np.inf, np.inf]])
 
     # Loop over every pixel
     for i in range(h):
@@ -96,8 +96,8 @@ def get_strokes(raw_img):
                 go, go_opp = True, True
 
                 # Initialize stroke width variables
-                stroke_width = np.Infinity
-                stroke_width_opp = np.Infinity
+                stroke_width = np.inf
+                stroke_width_opp = np.inf
                 while (go or go_opp) and (step_size < step_limit):
                     step_size += 1
 
@@ -152,9 +152,9 @@ def get_strokes(raw_img):
 
     # Remove infinite stroke width
     stroke_widths_opp = np.delete(stroke_widths[:, 1],
-                                    np.where(stroke_widths[:, 1] == np.Infinity))
+                                    np.where(stroke_widths[:, 1] == np.inf))
     stroke_widths = np.delete(stroke_widths[:, 0],
-                                np.where(stroke_widths[:, 0] == np.Infinity))
+                                np.where(stroke_widths[:, 0] == np.inf))
 
     return stroke_widths, stroke_widths_opp
 
@@ -163,7 +163,7 @@ def get_strokes(raw_img):
 def average_SWT(raw_img):
     stroke_widths, _ = get_strokes(raw_img)
     # Filter out infinite values
-    stroke_widths = stroke_widths[stroke_widths != np.Infinity]
+    stroke_widths = stroke_widths[stroke_widths != np.inf]
 
     if len(stroke_widths) == 0:
         return 0
