@@ -8,13 +8,17 @@
 
 import numpy as np
 import cv2
-from PIL import Image
 import matplotlib.pyplot as plt
 import math
-from swt.swt import open_grayscale, get_edges, get_gradients, apply_swt
+from swt.swt import open_grayscale
 from skimage.morphology import skeletonize
+from scipy.ndimage import convolve
+from scipy.spatial import Voronoi, voronoi_plot_2d
+from itertools import combinations
 
 show_images = True
+
+global AveWid
 
 def get_average_height(img_in):
     # Format and normalise image
@@ -174,7 +178,8 @@ def average_SWT(raw_img):
 # Added threshold that can allow for better groupings of non-overlapping characters
 # Threshold - Minimum number of consecutive results required to make a group
 # MinSplit - Minimum percentage of the bound for an AW point to be valid for a group
-def get_character_splits(smeared_img, AveWid, AW, threshold=1, min_split=0.2):
+def get_character_splits(smeared_img, AW, threshold=1, min_split=0.2):
+    global AveWid
     # Get projection of image along x-axis (horizontal projection)
     xProj = np.sum(smeared_img, axis=0)
     # Collect points where the projection is 0
@@ -254,6 +259,7 @@ def vertical_smearing(img, height=15):
     return cv2.morphologyEx(img, cv2.MORPH_CLOSE, vertical_kernel)
 
 def coarse_segmentation(raw_img, flip_binary=False):
+    global AveWid
     # Modified threshold value for better results
     AveWid = get_average_width(raw_img, 0.9)
     AW = average_SWT(raw_img)
@@ -270,7 +276,7 @@ def coarse_segmentation(raw_img, flip_binary=False):
         cv2.waitKey(0)
 
     # Split characters, where split_points are 0-based splits and aw_points are from oversized segments
-    split_points, aw_points = get_character_splits(smeared_img, AveWid, AW, 5, 0.4)
+    split_points, aw_points = get_character_splits(smeared_img, AW, 5, 0.4)
 
     if show_images:
         plt.imshow(cv2.cvtColor(raw_img, cv2.COLOR_BGR2RGB))
@@ -298,7 +304,137 @@ def show_cropped_sections(cropped_images):
 
     plt.show()
 
+def draw_local_peak(cropped, img):
+    global AveWid
+    # Get projection of image along x-axis (vertical projection)
+    yProj = np.sum(cropped, axis=0)
 
+    # Find local peaks (points where the derivative is negative)
+    peaks = []
+    for i in range(1, len(yProj) - 1):
+        if (yProj[i - 1] < yProj[i]) and (yProj[i] > yProj[i + 1]):
+            peaks.append(i)
+
+    threshold = AveWid * 0.2
+    merged_peaks = [peaks[0]]
+    for peak in peaks[1:]:
+        if peak - merged_peaks[-1] <= threshold:
+            if yProj[peak] > yProj[merged_peaks[-1]]:
+                merged_peaks[-1] = peak
+        else:
+            merged_peaks.append(peak)
+    peaks = merged_peaks
+
+    # Calculate the ratio between the image width and AveWid
+    num_peaks = round(cropped.shape[1] / AveWid)
+
+    peaks = sorted(peaks, key=lambda x: yProj[x], reverse=True)
+
+    plt.plot(yProj)
+    plt.vlines(peaks[:num_peaks], ymin=min(yProj), ymax=max(yProj), colors='r', linestyles='dashed')
+    plt.title('yProjection Visualization')
+    plt.xlabel('Index')
+    plt.ylabel('Sum')
+    plt.show()
+
+    # Draw lines at the largest local peaks
+    for peak in peaks[:num_peaks]:
+        img[:, peak, 0] = 255
+
+    return img, peaks[:num_peaks]
+
+def generate_voronoi_diagram(skeleton_img, vertical_lines):
+    critical_points = []
+    for current, next in zip(vertical_lines, vertical_lines[1:]):
+        current += 1
+        segment = skeleton_img[:, current:next]
+        show_cropped_sections([segment])
+        endpoints = find_endpoints(segment)
+        junctions = find_junctions(segment)
+
+        endpoints = [(y, x + current) for y, x in endpoints]
+        junctions = [(y, x + current) for y, x in junctions]
+
+        critical_points.extend(endpoints + junctions)
+
+        plt.imshow(segment, cmap='gray')
+        for point in endpoints:
+            y, x = point
+            plt.plot(x - current, y, 'ro')
+        for point in junctions:
+            y, x = point
+            plt.plot(x - current, y, 'go')
+        plt.show()
+
+    vor_diagram = Voronoi(critical_points)
+    overlay_voronoi_on_image(vor_diagram, skeleton_img)
+
+    return vor_diagram
+
+def overlay_voronoi_on_image(vor, image):
+    plt.imshow(image, cmap='gray')
+
+    for ridge in vor.ridge_vertices:
+        if -1 in ridge:
+            continue
+        v0, v1 = ridge
+        plt.plot([vor.vertices[v0, 0], vor.vertices[v1, 0]],
+                    [vor.vertices[v0, 1], vor.vertices[v1, 1]], 'r-', lw=1)
+
+    plt.title('Voronoi Diagram')
+    plt.legend()
+    plt.axis('off')
+    plt.show()
+
+def find_endpoints(img):
+    bin_img = (img.reshape(img.shape[0], img.shape[1]) == 255).astype(int)
+
+    kernel = np.ones((3, 3), dtype=int)
+    kernel[1, 1] = 0
+
+    neighbor_counts = convolve(bin_img, kernel, mode='constant', cval=0)
+    endpoints = np.argwhere((bin_img == 1) & (neighbor_counts == 1))
+
+    endpoint_list = [tuple(loc) for loc in endpoints]
+    print("Endpoints:", endpoint_list)
+    return endpoint_list
+
+def find_junctions(img):
+    bin_img = (img.reshape(img.shape[0], img.shape[1]) == 255).astype(int)
+    kernel = np.ones((3, 3), dtype=int)
+    kernel[1, 1] = 0
+
+    neighbor_counts = convolve(bin_img, kernel, mode='constant', cval=0)
+
+    candidates = np.argwhere((bin_img == 1) & (neighbor_counts >= 3))
+    junctions = []
+    for y, x in candidates:
+        if non_adjacent_neighbors(bin_img, y, x):
+            junctions.append((y, x))
+
+    print("Junctions: ", junctions)
+
+    return [tuple(loc) for loc in junctions]
+
+def non_adjacent_neighbors(bin_img, y, x):
+        # Collect all valid 'on' neighbors (8 directions)
+        nbrs = []
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                if (dy, dx) != (0, 0):
+                    ny, nx = y + dy, x + dx
+                    if (0 <= ny < bin_img.shape[0] and
+                        0 <= nx < bin_img.shape[1] and
+                        bin_img[ny, nx] == 1):
+                        nbrs.append((ny, nx))
+
+        # Check pairwise adjacency among neighbors
+        for (y1, x1), (y2, x2) in combinations(nbrs, 2):
+            # If they lie within 1 step of each other (including diagonals), they're adjacent
+            if abs(y1 - y2) <= 1 and abs(x1 - x2) <= 1:
+                return False
+
+        return True
 
 def fine_segmentation(img, split_points, aw_points):
     oversized_bounds = []
@@ -310,13 +446,17 @@ def fine_segmentation(img, split_points, aw_points):
     cropped_images = []
     skeleton_images = []
     for lower_bound, upper_bound in oversized_bounds:
-        cropped_img = img[:, lower_bound:upper_bound]
+        cropped_img = (img[:, lower_bound:upper_bound] < 0.9)
         cropped_images.append(cropped_img)
         skeleton = skeletonize(cropped_img)
         skeleton_images.append(skeleton)
 
     show_cropped_sections(cropped_images)
-    show_cropped_sections(skeleton_images)
+
+    for i in range(len(skeleton_images)):
+        skeleton_images[i], vl = draw_local_peak(cropped_images[i], skeleton_images[i])
+        show_cropped_sections([skeleton_images[i]])
+        generate_voronoi_diagram(skeleton_images[i], vl)
 
     print(oversized_bounds)
 
@@ -358,7 +498,7 @@ def remove_space(img, space=10):
 
 if __name__ == '__main__':
     flip_binary = True
-    input_file = 'input.png'
+    input_file = 'images/input.png'
     raw_img = open_grayscale(input_file)
     raw_img = remove_space(raw_img)
     split_points, aw_points = coarse_segmentation(raw_img, flip_binary)
