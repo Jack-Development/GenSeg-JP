@@ -9,6 +9,7 @@
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import math
 from swt.swt import open_grayscale
 from skimage.morphology import skeletonize
@@ -344,7 +345,6 @@ def draw_local_peak(cropped, img):
     return img, peaks[:num_peaks]
 
 def generate_voronoi_diagram(skeleton_img, vertical_lines):
-    critical_points = []
     for current, next in zip(vertical_lines, vertical_lines[1:]):
         current += 1
         segment = skeleton_img[:, current:next]
@@ -352,39 +352,234 @@ def generate_voronoi_diagram(skeleton_img, vertical_lines):
         endpoints = find_endpoints(segment)
         junctions = find_junctions(segment)
 
-        endpoints = [(y, x + current) for y, x in endpoints]
-        junctions = [(y, x + current) for y, x in junctions]
+        endpoints = [(y, x) for y, x in endpoints]
+        junctions = [(y, x) for y, x in junctions]
 
-        critical_points.extend(endpoints + junctions)
+        critical_points = endpoints + junctions
 
-        plt.imshow(segment, cmap='gray')
+        plt.imshow(segment, cmap='gray', origin='upper')
         for point in endpoints:
             y, x = point
-            plt.plot(x - current, y, 'ro')
+            plt.plot(x, y, 'ro')
         for point in junctions:
             y, x = point
-            plt.plot(x - current, y, 'go')
+            plt.plot(x, y, 'go')
         plt.show()
 
-    vor_diagram = Voronoi(critical_points)
-    overlay_voronoi_on_image(vor_diagram, skeleton_img)
+        vor_diagram = Voronoi(critical_points)
+
+        finite_segments, infinite_segments = process_voronoi(vor_diagram, segment)
+        segment_fitness = get_segment_fitness([*finite_segments, *infinite_segments], segment)
+        finite_fitness = segment_fitness[:len(finite_segments)]
+        infinite_fitness = segment_fitness[len(finite_segments):]
+
+        all_segments = [*finite_segments, *infinite_segments]
+        all_fitness = [*finite_fitness, *infinite_fitness]
+        display_segments(segment, all_segments, all_fitness)
+
+        a_star(segment, all_segments, all_fitness)
 
     return vor_diagram
 
-def overlay_voronoi_on_image(vor, image):
-    plt.imshow(image, cmap='gray')
+def a_star(image, segments, fitness):
+    height, width = image.shape[:2]
+    height, width = height - 1, width - 1
 
-    for ridge in vor.ridge_vertices:
-        if -1 in ridge:
-            continue
-        v0, v1 = ridge
-        plt.plot([vor.vertices[v0, 0], vor.vertices[v1, 0]],
-                    [vor.vertices[v0, 1], vor.vertices[v1, 1]], 'r-', lw=1)
+    print(segments)
+    start_position = [seg[0] if seg[0][1] < 0 else seg[1] for seg in segments if seg[0][1] < 0 or seg[1][1] < 0]
+    end_position = [seg[0] if seg[0][1] > height else seg[1] for seg in segments if seg[0][1] > height or seg[1][1] > height]
+
+    start_position = list(set(start_position))
+    end_position = list(set(end_position))
+    print(start_position)
+    print(end_position)
+
+def display_segments(image, seg, fit, show_fitness=True):
+    min_fitness = min(fit)
+    max_fitness = max(fit)
+
+    height, width = image.shape[:2]
+    height, width = height - 1, width - 1
+    plt.imshow(image, cmap='gray', origin='upper')
+    cmap = mcolors.LinearSegmentedColormap.from_list("", ["green", "red"])
+
+    for i, segment in enumerate(seg):
+        p1, p2 = segment
+        percentage = (fit[i] - min_fitness) / (max_fitness - min_fitness)
+        color = cmap(percentage)
+        plt.plot([p1[0], p2[0]], [p1[1], p2[1]], color=color, lw=1)
+
+    if show_fitness:
+        for i, fitness in enumerate(fit):
+            percentage = (fit[i] - min_fitness) / (max_fitness - min_fitness)
+            color = cmap(percentage)
+            plt.text(seg[i][0][0], seg[i][0][1], str(round(fitness, 2)), color=color)
+
+    plt.xlim(0, width)
+    plt.ylim(height, 0)
+    plt.show()
+
+def get_segment_fitness(segment_list, image):
+    kernel = [[1, 2, 1], [2, 3, 2], [1, 2, 1]]
+    fitness_values = []
+
+    for segment in segment_list:
+        (x1, y1), (x2, y2) = segment
+        line_pixels = bresenham_line(x1, y1, x2, y2)
+
+        fitness = 0
+        for (x, y) in line_pixels:
+            fitness += apply_kernel(image, kernel, x, y)
+
+        line_length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+        fitness += line_length
+
+        fitness_values.append(fitness)
+
+    return fitness_values
+
+def apply_kernel(image, kernel, x, y):
+    kernel_size = len(kernel)
+    offset = kernel_size // 2
+
+    # If the kernel cannot be fully applied at boundaries return 0
+    rows = len(image)
+    cols = len(image[0]) if rows > 0 else 0
+
+    # Check boundaries
+    if (x - offset < 0 or x + offset >= cols or
+        y - offset < 0 or y + offset >= rows):
+        return 0
+
+    # Accumulate the sum within the 3×3 region
+    kernel_sum = 0
+    for ky in range(kernel_size):
+        for kx in range(kernel_size):
+            # Map kernel coordinates to image coordinates
+            img_x = x + (kx - offset)
+            img_y = y + (ky - offset)
+            kernel_sum += image[img_y][img_x] * kernel[ky][kx]
+
+    return kernel_sum[0]
+
+def bresenham_line(x1, y1, x2, y2):
+    # Algorithm from python-bresenham
+    # https://github.com/Azrood/python-bresenham
+    # Original code by Azrood
+    # https://github.com/Azrood
+    points = []
+
+    # Calculate deltas
+    dx = x2 - x1
+    dy = y2 - y1
+
+    # Determine how steep the line is
+    is_steep = abs(dy) > abs(dx)
+
+    # If the line is steep, transpose coordinates
+    if is_steep:
+        x1, y1 = y1, x1
+        x2, y2 = y2, x2
+
+    # Swap if starting x is greater than ending x
+    swapped = False
+    if x1 > x2:
+        x1, x2 = x2, x1
+        y1, y2 = y2, y1
+        swapped = True
+
+    dx = x2 - x1
+    dy = y2 - y1
+    error = int(dx / 2.0)
+    ystep = 1 if y1 < y2 else -1
+
+    y = y1
+    for x in range(x1, x2 + 1):
+        # Transpose coordinates back if needed
+        if is_steep:
+            points.append((y, x))
+        else:
+            points.append((x, y))
+
+        error -= abs(dy)
+        if error < 0:
+            y += ystep
+            error += dx
+
+    # If swapped, reverse the result
+    if swapped:
+        points.reverse()
+
+    return points
+
+def process_voronoi(vor, image):
+    height, width = image.shape[:2]
+    height, width = height - 1, width - 1
+    plt.imshow(image, cmap='gray', origin='upper')
+
+    # Modified from scipy source code
+    # https://github.com/scipy/scipy/blob/v1.15.1/scipy/spatial/_plotutils.py
+    # Original code by Pauli Virtanen
+    # https://github.com/pv
+
+    center = vor.points.mean(axis=0)
+    ptp_bound = np.ptp(vor.points, axis=0)
+
+    finite_segments = []
+    infinite_segments = []
+    for pointidx, simplex in zip(vor.ridge_points, vor.ridge_vertices):
+        simplex = np.asarray(simplex)
+        if np.all(simplex >= 0):
+            p1 = vor.vertices[simplex[0]]
+            p2 = vor.vertices[simplex[1]]
+
+            # Apply rotation and flipping
+            p1_transformed = (round(p1[1]), round(p1[0]))
+            p2_transformed = (round(p2[1]), round(p2[0]))
+
+            finite_segments.append([p1_transformed, p2_transformed])
+        else:
+            i = simplex[simplex >= 0][0] # finite end Voronoi vertex
+            t = vor.points[pointidx[1]] - vor.points[pointidx[0]]  # tangent
+            t /= np.linalg.norm(t)
+            n = np.array([-t[1], t[0]])  # normal
+
+            midpoint = vor.points[pointidx].mean(axis=0)
+            direction = np.sign(np.dot(midpoint - center, n)) * n
+            if (vor.furthest_site):
+                direction = -direction
+            aspect_factor = abs(ptp_bound.max() / ptp_bound.min())
+            far_point = vor.vertices[i] + direction * ptp_bound.max() * aspect_factor
+
+            i_transformed = (round(vor.vertices[i][1]), round(vor.vertices[i][0]))
+            far_point_transformed = (round(far_point[1]), round(far_point[0]))
+
+            infinite_segments.append([i_transformed, far_point_transformed])
+
+    # Plot finite segments
+    for segment in finite_segments:
+        p1, p2 = segment
+        plt.plot([p1[0], p2[0]], [p1[1], p2[1]], 'r-', lw=1)
+
+    # Plot infinite segments
+    for segment in infinite_segments:
+        p1, p2 = segment
+        plt.plot([p1[0], p2[0]], [p1[1], p2[1]], 'r--', lw=1)
+
+    # Highlight critical points with transformations
+    for point in vor.points:
+        transformed_point = (point[1], point[0])
+        plt.plot(transformed_point[0], transformed_point[1], 'go', markersize=3)
+
+    plt.xlim(0, width)
+    plt.ylim(height, 0)
 
     plt.title('Voronoi Diagram')
     plt.legend()
     plt.axis('off')
     plt.show()
+
+    return finite_segments, infinite_segments
 
 def find_endpoints(img):
     bin_img = (img.reshape(img.shape[0], img.shape[1]) == 255).astype(int)
@@ -396,7 +591,6 @@ def find_endpoints(img):
     endpoints = np.argwhere((bin_img == 1) & (neighbor_counts == 1))
 
     endpoint_list = [tuple(loc) for loc in endpoints]
-    print("Endpoints:", endpoint_list)
     return endpoint_list
 
 def find_junctions(img):
@@ -411,8 +605,6 @@ def find_junctions(img):
     for y, x in candidates:
         if non_adjacent_neighbors(bin_img, y, x):
             junctions.append((y, x))
-
-    print("Junctions: ", junctions)
 
     return [tuple(loc) for loc in junctions]
 
@@ -457,8 +649,6 @@ def fine_segmentation(img, split_points, aw_points):
         skeleton_images[i], vl = draw_local_peak(cropped_images[i], skeleton_images[i])
         show_cropped_sections([skeleton_images[i]])
         generate_voronoi_diagram(skeleton_images[i], vl)
-
-    print(oversized_bounds)
 
 def remove_space(img, space=10):
     # Change image to correct format
