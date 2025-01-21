@@ -11,6 +11,7 @@ import cv2
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import math
+import heapq
 from swt.swt import open_grayscale
 from skimage.morphology import skeletonize
 from scipy.ndimage import convolve
@@ -347,6 +348,7 @@ def draw_local_peak(cropped, img):
 
 
 def generate_voronoi_diagram(skeleton_img, vertical_lines):
+    vor_diagrams = []
     for current, next in zip(vertical_lines, vertical_lines[1:]):
         current += 1
         segment = skeleton_img[:, current:next]
@@ -373,7 +375,17 @@ def generate_voronoi_diagram(skeleton_img, vertical_lines):
             return
 
         vor_diagram = Voronoi(critical_points)
+        vor_diagrams.append(vor_diagram)
 
+    return vor_diagrams
+
+
+def create_cut(skeleton_img, vertical_lines, vor_diagrams):
+    for current, next in zip(vertical_lines, vertical_lines[1:]):
+        current += 1
+        segment = skeleton_img[:, current:next]
+
+        vor_diagram = vor_diagrams.pop()
         finite_segments, infinite_segments = process_voronoi(vor_diagram, segment)
         segment_fitness = get_segment_fitness([*finite_segments, *infinite_segments], segment)
         finite_fitness = segment_fitness[:len(finite_segments)]
@@ -383,23 +395,100 @@ def generate_voronoi_diagram(skeleton_img, vertical_lines):
         all_fitness = [*finite_fitness, *infinite_fitness]
         display_segments(segment, all_segments, all_fitness)
 
-        a_star(segment, all_segments, all_fitness)
+        path = a_star(segment, all_segments, all_fitness)
+        display_path = path_to_segments(path)
+        display_segments(segment, display_path, all_fitness, False)
 
-    return vor_diagram
+        path = [(current + x, y) for (x, y) in path]
+
+        return path
 
 
 def a_star(image, segments, fitness):
     height, width = image.shape[:2]
     height, width = height - 1, width - 1
 
-    print(segments)
-    start_position = [seg[0] if seg[0][1] < 0 else seg[1] for seg in segments if seg[0][1] < 0 or seg[1][1] < 0]
-    end_position = [seg[0] if seg[0][1] > height else seg[1] for seg in segments if seg[0][1] > height or seg[1][1] > height]
+    start_positions = [seg[0] if seg[0][1] < 0 else seg[1] for seg in segments if seg[0][1] < 0 or seg[1][1] < 0]
+    end_positions = [seg[0] if seg[0][1] > height else seg[1] for seg in segments if seg[0][1] > height or seg[1][1] > height]
 
-    start_position = list(set(start_position))
-    end_position = list(set(end_position))
-    print(start_position)
-    print(end_position)
+    start_positions = list(set(start_positions))
+    end_positions = list(set(end_positions))
+
+    # Algorithm from OVRDOZE
+    # https://github.com/dille12/OVRDOZE
+    # Original code by dille12
+    # https://github.com/dille12
+
+    adjacency = {}
+    for i, (node_a, node_b) in enumerate(segments):
+        cost = fitness[i]
+        adjacency.setdefault(node_a, []).append((node_b, cost))
+        adjacency.setdefault(node_b, []).append((node_a, cost))
+
+    open_set = []   # priority queue of (f_score, node)
+    came_from = {}  # track best parent to reconstruct path
+    g_score = {}    # cost from start to current node
+    f_score = {}    # estimated cost from start to goal through current node
+
+    for s in start_positions:
+        g_score[s] = 0.0
+        f_score[s] = heuristic(s, end_positions)
+        heapq.heappush(open_set, (f_score[s], s))
+
+    # Standard A* loop
+    while open_set:
+        current_f, current = heapq.heappop(open_set)
+
+        # If current is an end node, reconstruct the path and return
+        if current in end_positions:
+            return reconstruct_path(came_from, current)
+
+        # If this is an outdated entry in the priority queue, skip
+        if current_f > f_score.get(current, float('inf')):
+            continue
+
+        # For each neighbor, check if we've found a better path
+        for neighbor, edge_cost in adjacency.get(current, []):
+            tentative_g = g_score[current] + edge_cost
+            if tentative_g < g_score.get(neighbor, float('inf')):
+                # This is a better path. Record it.
+                came_from[neighbor] = current
+                g_score[neighbor] = tentative_g
+                f_score[neighbor] = tentative_g + heuristic(neighbor, end_positions)
+                heapq.heappush(open_set, (f_score[neighbor], neighbor))
+
+    # If we exit the loop, there's no path
+    print("No path could be found from any start to any end.")
+    return None
+
+
+def heuristic(current_node, end_nodes):
+    """
+    For multi-end, we use the minimum Euclidean distance to any of the end nodes.
+    """
+    if not end_nodes:
+        return 0.0
+    (x1, y1) = current_node
+    # Compute the min distance from current_node to any end_node
+    return min(
+        math.hypot(x1 - x2, y1 - y2)
+        for (x2, y2) in end_nodes
+    )
+
+
+def reconstruct_path(came_from, current):
+    path = [current]
+    while current in came_from:
+        current = came_from[current]
+        path.append(current)
+    path.reverse()
+    return path
+
+
+def path_to_segments(path):
+    if not path or len(path) < 2:
+        return []
+    return [[path[i], path[i + 1]] for i in range(len(path) - 1)]
 
 
 def display_segments(image, seg, fit, show_fitness=True):
@@ -650,17 +739,73 @@ def fine_segmentation(img, split_points, aw_points):
     cropped_images = []
     skeleton_images = []
     for lower_bound, upper_bound in oversized_bounds:
-        cropped_img = (img[:, lower_bound:upper_bound] < 0.9)
+        cropped_img = [img[:, lower_bound:upper_bound] < 0.9, lower_bound, upper_bound]
         cropped_images.append(cropped_img)
-        skeleton = skeletonize(cropped_img)
+        skeleton = skeletonize(cropped_img[0])
         skeleton_images.append(skeleton)
 
-    show_cropped_sections(cropped_images)
+    show_cropped_sections([img for img, _, _ in cropped_images])
 
+    divided_images = []
     for i in range(len(skeleton_images)):
-        skeleton_images[i], vl = draw_local_peak(cropped_images[i], skeleton_images[i])
+        skeleton_images[i], vl = draw_local_peak(cropped_images[i][0], skeleton_images[i])
         show_cropped_sections([skeleton_images[i]])
-        generate_voronoi_diagram(skeleton_images[i], vl)
+        voronoi_diagrams = generate_voronoi_diagram(skeleton_images[i], vl)
+        cut_path = create_cut(skeleton_images[i], vl, voronoi_diagrams)
+        divided_images.append(cut_image(img[:, cropped_images[i][1]:cropped_images[i][2]], cut_path))
+
+    final_images = []
+    for i in range(len(split_points) - 1):
+        lower_bound = math.floor(split_points[i])
+        if (lower_bound in [bound[0] for bound in oversized_bounds]):
+            final_images.extend(divided_images.pop(0))
+            continue
+        upper_bound = math.ceil(split_points[i + 1])
+        final_images.append(img[:, lower_bound:upper_bound])
+
+    return final_images
+
+
+def cut_image(cropped_img, cut_path):
+    height, width = cropped_img.shape[:2]
+    cut_path.insert(0, (0, 0))
+    cut_path.append((0, height))
+
+    mask_pos = np.ones(cropped_img.shape[:2], dtype=np.uint8)
+    cv2.fillPoly(mask_pos, [np.array(cut_path, dtype=np.int32)], 0)
+    mask_neg = np.zeros(cropped_img.shape[:2], dtype=np.uint8)
+    cv2.fillPoly(mask_neg, [np.array(cut_path, dtype=np.int32)], 1)
+
+    plt.imshow(mask_pos, cmap='gray')
+    plt.show()
+
+    plt.imshow(mask_neg, cmap='gray')
+    plt.show()
+
+    img1 = cv2.bitwise_and(cropped_img, cropped_img, mask=mask_neg)
+    img2 = cv2.bitwise_and(cropped_img, cropped_img, mask=mask_pos)
+    img1[mask_neg == 0] = 1
+    img2[mask_pos == 0] = 1
+
+    plt.imshow(img1, cmap='gray')
+    plt.show()
+
+    plt.imshow(img2, cmap='gray')
+    plt.show()
+
+    x, y, w, h = cv2.boundingRect(mask_neg)
+    img1_cropped = img1[y : y + h, x : x + w]
+
+    x, y, w, h = cv2.boundingRect(mask_pos)
+    img2_cropped = img2[y : y + h, x : x + w]
+
+    plt.imshow(img1_cropped, cmap='gray')
+    plt.show()
+
+    plt.imshow(img2_cropped, cmap='gray')
+    plt.show()
+
+    return img1_cropped, img2_cropped
 
 
 def remove_space(img, space=10):
@@ -707,3 +852,7 @@ if __name__ == '__main__':
     raw_img = remove_space(raw_img)
     split_points, aw_points = coarse_segmentation(raw_img, flip_binary)
     output = fine_segmentation(raw_img, split_points, aw_points)
+
+    for img in output:
+        plt.imshow(img, cmap='gray')
+        plt.show()
