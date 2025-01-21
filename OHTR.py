@@ -21,11 +21,12 @@ show_images = True
 
 global AveWid
 
+
 def get_average_height(img_in):
     # Format and normalise image
     img_in = np.squeeze(img_in)
     img_in = ((img_in / img_in.max()) * 255).astype(np.uint8)
-    img = cv2.adaptiveThreshold(img_in,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,21,25)
+    img = cv2.adaptiveThreshold(img_in, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 25)
 
     # Collect contours of all characters
     contours = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]
@@ -41,6 +42,7 @@ def get_average_height(img_in):
         return np.mean(heights)
     return 0
 
+
 def get_average_width(img, alpha=0.75):
     # Assume AveWid = α × H_tl
     return get_average_height(img) * alpha
@@ -55,11 +57,14 @@ def get_average_width(img, alpha=0.75):
 # Epshtein, B., Ofek, E., & Wexler, Y. (2010). Detecting Text in Natural Scenes with Stroke Width Transform.
 # In Proceedings of the IEEE - Institute of Electrical and Electronics Engineers (June).
 # https://doi.org/10.1109/CVPR.2010.5540041
+
+
 def apply_canny(img, sigma=0.33):
     v = np.median(img)
     lower = int(max(0, (1.0 - sigma) * v))
     upper = int(min(255, (1.0 + sigma) * v))
     return cv2.Canny(img, lower, upper)
+
 
 def get_strokes(raw_img):
     # Maximum number of steps to along the gradient to find stroke width
@@ -118,11 +123,9 @@ def get_strokes(raw_img):
                                 # Check if next pixel is an edge
                                 if canny_img[curX, curY] != 0:
                                     # Check if edge is opposite to gradient direction
-                                    if np.arccos(gradX * -gradsX[curX, curY] + \
-                                                gradY * -gradsY[curX, curY]) < np.pi / 2.0:
+                                    if np.arccos(gradX * -gradsX[curX, curY] + gradY * -gradsY[curX, curY]) < np.pi / 2.0:
                                         # Calculate stroke width
-                                        stroke_width = int(np.sqrt((curX - i) ** 2 + \
-                                                                    (curY - j) ** 2))
+                                        stroke_width = int(np.sqrt((curX - i) ** 2 + (curY - j) ** 2))
                                         go = False
                             except IndexError:
                                 go = False
@@ -139,10 +142,8 @@ def get_strokes(raw_img):
                         if go_opp and ((curX_opp != prevX_opp) or (curY_opp != prevY_opp)):
                             try:
                                 if canny_img[curX_opp, curY_opp] != 0:
-                                    if np.arccos(gradX * -gradsX[curX_opp, curY_opp] + \
-                                            gradY * -gradsY[curX_opp, curY_opp]) < np.pi/2.0:
-                                        stroke_width_opp = int(np.sqrt((curX_opp - i) ** 2 + \
-                                                                        (curY_opp - j) ** 2))
+                                    if np.arccos(gradX * -gradsX[curX_opp, curY_opp] + gradY * -gradsY[curX_opp, curY_opp]) < np.pi / 2.0:
+                                        stroke_width_opp = int(np.sqrt((curX_opp - i) ** 2 + (curY_opp - j) ** 2))
                                         go_opp = False
 
                             except IndexError:
@@ -152,18 +153,16 @@ def get_strokes(raw_img):
                             prevY_opp = curY_opp
 
                 # Append stroke widths in both directions to array
-                stroke_widths = np.append(stroke_widths, [(stroke_width, stroke_width_opp)],
-                                            axis=0)
+                stroke_widths = np.append(stroke_widths, [(stroke_width, stroke_width_opp)], axis=0)
 
     # Remove infinite stroke width
-    stroke_widths_opp = np.delete(stroke_widths[:, 1],
-                                    np.where(stroke_widths[:, 1] == np.inf))
-    stroke_widths = np.delete(stroke_widths[:, 0],
-                                np.where(stroke_widths[:, 0] == np.inf))
+    stroke_widths_opp = np.delete(stroke_widths[:, 1], np.where(stroke_widths[:, 1] == np.inf))
+    stroke_widths = np.delete(stroke_widths[:, 0], np.where(stroke_widths[:, 0] == np.inf))
 
     return stroke_widths, stroke_widths_opp
 
 # -----------------------------------------------------------------------------
+
 
 def average_SWT(raw_img):
     stroke_widths, _ = get_strokes(raw_img)
@@ -188,7 +187,7 @@ def get_character_splits(smeared_img, AW, threshold=1, min_split=0.2):
 
     # Group zero points into consecutive groups, then return the mean
     mean_points = np.array([])
-    if(len(zero_points) > 0):
+    if (len(zero_points) > 0):
         group = [zero_points[0]]
         consecutive_count = 0
         for i in range(1, len(zero_points)):
@@ -241,11 +240,11 @@ def get_character_splits(smeared_img, AW, threshold=1, min_split=0.2):
 
         graph_top = np.max(xProj) * 1.1
         plt.ylim(0, graph_top)
-        plt.vlines(x=mean_points, ymin=0, ymax=graph_top, color='red', linestyle='--', label=f'Zero point')
+        plt.vlines(x=mean_points, ymin=0, ymax=graph_top, color='red', linestyle='--', label='Zero point')
         if (len(aw_points) > 1):
-            plt.vlines(x=aw_points, ymin=0, ymax=graph_top, color='blue', linestyle='--', label=f'AW point')
+            plt.vlines(x=aw_points, ymin=0, ymax=graph_top, color='blue', linestyle='--', label='AW point')
         elif len(aw_points) == 1:
-            plt.axvline(x=aw_points[0], color='blue', linestyle='--', label=f'AW point')
+            plt.axvline(x=aw_points[0], color='blue', linestyle='--', label='AW point')
 
         plt.grid(True)
         plt.legend()
@@ -253,11 +252,13 @@ def get_character_splits(smeared_img, AW, threshold=1, min_split=0.2):
 
     return mean_points, aw_points
 
+
 def vertical_smearing(img, height=15):
     # Create vertical kernel
     # TODO: Select automatic kernel size from image shape
     vertical_kernel = np.ones((height, 1), np.uint8)
     return cv2.morphologyEx(img, cv2.MORPH_CLOSE, vertical_kernel)
+
 
 def coarse_segmentation(raw_img, flip_binary=False):
     global AveWid
@@ -291,7 +292,6 @@ def coarse_segmentation(raw_img, flip_binary=False):
     return split_points, aw_points
 
 
-
 def show_cropped_sections(cropped_images):
     num_images = len(cropped_images)
     fig, axes = plt.subplots(1, num_images, figsize=(15, 5))
@@ -304,6 +304,7 @@ def show_cropped_sections(cropped_images):
         ax.axis('off')
 
     plt.show()
+
 
 def draw_local_peak(cropped, img):
     global AveWid
@@ -344,6 +345,7 @@ def draw_local_peak(cropped, img):
 
     return img, peaks[:num_peaks]
 
+
 def generate_voronoi_diagram(skeleton_img, vertical_lines):
     for current, next in zip(vertical_lines, vertical_lines[1:]):
         current += 1
@@ -366,6 +368,10 @@ def generate_voronoi_diagram(skeleton_img, vertical_lines):
             plt.plot(x, y, 'go')
         plt.show()
 
+        if (len(critical_points) < 1):
+            print("\033[91m" + "WARNING: No critical points found" + "\033[0m")
+            return
+
         vor_diagram = Voronoi(critical_points)
 
         finite_segments, infinite_segments = process_voronoi(vor_diagram, segment)
@@ -381,6 +387,7 @@ def generate_voronoi_diagram(skeleton_img, vertical_lines):
 
     return vor_diagram
 
+
 def a_star(image, segments, fitness):
     height, width = image.shape[:2]
     height, width = height - 1, width - 1
@@ -393,6 +400,7 @@ def a_star(image, segments, fitness):
     end_position = list(set(end_position))
     print(start_position)
     print(end_position)
+
 
 def display_segments(image, seg, fit, show_fitness=True):
     min_fitness = min(fit)
@@ -419,6 +427,7 @@ def display_segments(image, seg, fit, show_fitness=True):
     plt.ylim(height, 0)
     plt.show()
 
+
 def get_segment_fitness(segment_list, image):
     kernel = [[1, 2, 1], [2, 3, 2], [1, 2, 1]]
     fitness_values = []
@@ -438,6 +447,7 @@ def get_segment_fitness(segment_list, image):
 
     return fitness_values
 
+
 def apply_kernel(image, kernel, x, y):
     kernel_size = len(kernel)
     offset = kernel_size // 2
@@ -447,8 +457,7 @@ def apply_kernel(image, kernel, x, y):
     cols = len(image[0]) if rows > 0 else 0
 
     # Check boundaries
-    if (x - offset < 0 or x + offset >= cols or
-        y - offset < 0 or y + offset >= rows):
+    if (x - offset < 0 or x + offset >= cols or y - offset < 0 or y + offset >= rows):
         return 0
 
     # Accumulate the sum within the 3×3 region
@@ -461,6 +470,7 @@ def apply_kernel(image, kernel, x, y):
             kernel_sum += image[img_y][img_x] * kernel[ky][kx]
 
     return kernel_sum[0]
+
 
 def bresenham_line(x1, y1, x2, y2):
     # Algorithm from python-bresenham
@@ -512,6 +522,7 @@ def bresenham_line(x1, y1, x2, y2):
 
     return points
 
+
 def process_voronoi(vor, image):
     height, width = image.shape[:2]
     height, width = height - 1, width - 1
@@ -539,7 +550,7 @@ def process_voronoi(vor, image):
 
             finite_segments.append([p1_transformed, p2_transformed])
         else:
-            i = simplex[simplex >= 0][0] # finite end Voronoi vertex
+            i = simplex[simplex >= 0][0]  # finite end Voronoi vertex
             t = vor.points[pointidx[1]] - vor.points[pointidx[0]]  # tangent
             t /= np.linalg.norm(t)
             n = np.array([-t[1], t[0]])  # normal
@@ -581,9 +592,9 @@ def process_voronoi(vor, image):
 
     return finite_segments, infinite_segments
 
-def find_endpoints(img):
-    bin_img = (img.reshape(img.shape[0], img.shape[1]) == 255).astype(int)
 
+def find_endpoints(img):
+    bin_img = (img.reshape(img.shape[0], img.shape[1]) > 0).astype(int)
     kernel = np.ones((3, 3), dtype=int)
     kernel[1, 1] = 0
 
@@ -593,8 +604,9 @@ def find_endpoints(img):
     endpoint_list = [tuple(loc) for loc in endpoints]
     return endpoint_list
 
+
 def find_junctions(img):
-    bin_img = (img.reshape(img.shape[0], img.shape[1]) == 255).astype(int)
+    bin_img = (img.reshape(img.shape[0], img.shape[1]) > 0).astype(int)
     kernel = np.ones((3, 3), dtype=int)
     kernel[1, 1] = 0
 
@@ -608,25 +620,25 @@ def find_junctions(img):
 
     return [tuple(loc) for loc in junctions]
 
+
 def non_adjacent_neighbors(bin_img, y, x):
-        # Collect all valid 'on' neighbors (8 directions)
-        nbrs = []
-        for dy in [-1, 0, 1]:
-            for dx in [-1, 0, 1]:
-                if (dy, dx) != (0, 0):
-                    ny, nx = y + dy, x + dx
-                    if (0 <= ny < bin_img.shape[0] and
-                        0 <= nx < bin_img.shape[1] and
-                        bin_img[ny, nx] == 1):
-                        nbrs.append((ny, nx))
+    # Collect all valid 'on' neighbors (8 directions)
+    nbrs = []
+    for dy in [-1, 0, 1]:
+        for dx in [-1, 0, 1]:
+            if (dy, dx) != (0, 0):
+                ny, nx = y + dy, x + dx
+                if (0 <= ny < bin_img.shape[0] and 0 <= nx < bin_img.shape[1] and bin_img[ny, nx] == 1):
+                    nbrs.append((ny, nx))
 
-        # Check pairwise adjacency among neighbors
-        for (y1, x1), (y2, x2) in combinations(nbrs, 2):
-            # If they lie within 1 step of each other (including diagonals), they're adjacent
-            if abs(y1 - y2) <= 1 and abs(x1 - x2) <= 1:
-                return False
+    # Check pairwise adjacency among neighbors
+    for (y1, x1), (y2, x2) in combinations(nbrs, 2):
+        # If they lie within 1 step of each other (including diagonals), they're adjacent
+        if abs(y1 - y2) <= 1 and abs(x1 - x2) <= 1:
+            return False
 
-        return True
+    return True
+
 
 def fine_segmentation(img, split_points, aw_points):
     oversized_bounds = []
@@ -650,6 +662,7 @@ def fine_segmentation(img, split_points, aw_points):
         show_cropped_sections([skeleton_images[i]])
         generate_voronoi_diagram(skeleton_images[i], vl)
 
+
 def remove_space(img, space=10):
     # Change image to correct format
     img = 1 - img
@@ -662,7 +675,7 @@ def remove_space(img, space=10):
 
     # Collect all groups that cross 0
     groups = []
-    if(len(zero_points) > 0):
+    if (len(zero_points) > 0):
         group = [zero_points[0]]
         for i in range(1, len(zero_points)):
             if (zero_points[i] == zero_points[i - 1] + 1) and i is not len(zero_points) - 1:
@@ -685,6 +698,7 @@ def remove_space(img, space=10):
     # Return image to original format
     img = 1 - img
     return img
+
 
 if __name__ == '__main__':
     flip_binary = True
