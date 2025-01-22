@@ -6,6 +6,7 @@ import jaconv
 import cv2
 import numpy as np
 import OHTR
+import math
 from PIL import Image
 import glob
 
@@ -116,7 +117,14 @@ if __name__ == "__main__":
         raw_img = OHTR.open_grayscale(image)
         raw_img = OHTR.remove_space(raw_img, round(raw_img.shape[1] * 0.05))
         split_points, aw_points = OHTR.coarse_segmentation(raw_img, True)
-        output = OHTR.fine_segmentation(raw_img, split_points, aw_points)
+        if (len(aw_points) == 0):
+            output = []
+            for i in range(len(split_points) - 1):
+                lower_bound = math.floor(split_points[i])
+                upper_bound = math.ceil(split_points[i + 1])
+                output.append(raw_img[:, lower_bound:upper_bound])
+        else:
+            output = OHTR.fine_segmentation(raw_img, split_points, aw_points)
         output = [img * 255 for img in output]
 
         for i, img in enumerate(output):
