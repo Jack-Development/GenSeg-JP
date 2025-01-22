@@ -1,7 +1,7 @@
-cd DocRes
+cd DocRes <br />
 git clone git@github.com:ZZZHANG-jx/DocRes.git
 
-cd EasyOCR
+cd EasyOCR <br />
 git clone git@github.com:JaidedAI/EasyOCR.git
 
 1. python -m venv JapanesePrintWrite
