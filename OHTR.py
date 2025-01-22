@@ -318,7 +318,7 @@ def draw_local_peak(cropped, img):
         if (yProj[i - 1] < yProj[i]) and (yProj[i] > yProj[i + 1]):
             peaks.append(i)
 
-    threshold = AveWid * 0.2
+    threshold = AveWid * 0.5
     merged_peaks = [peaks[0]]
     for peak in peaks[1:]:
         if peak - merged_peaks[-1] <= threshold:
@@ -350,6 +350,10 @@ def draw_local_peak(cropped, img):
 def generate_voronoi_diagram(skeleton_img, vertical_lines):
     vor_diagrams = []
     for current, next in zip(vertical_lines, vertical_lines[1:]):
+        if current > next:
+            temp = current
+            current = next
+            next = temp
         current += 1
         segment = skeleton_img[:, current:next]
         show_cropped_sections([segment])
@@ -383,6 +387,10 @@ def generate_voronoi_diagram(skeleton_img, vertical_lines):
 def create_cut(skeleton_img, vertical_lines, vor_diagrams):
     for current, next in zip(vertical_lines, vertical_lines[1:]):
         current += 1
+        if current > next:
+            temp = current
+            current = next
+            next = temp
         segment = skeleton_img[:, current:next]
 
         vor_diagram = vor_diagrams.pop()
@@ -730,6 +738,14 @@ def non_adjacent_neighbors(bin_img, y, x):
 
 
 def fine_segmentation(img, split_points, aw_points):
+    if (len(aw_points) < 1):
+        final_images = []
+        for i in range(len(split_points) - 1):
+            lower_bound = math.floor(split_points[i])
+            upper_bound = math.ceil(split_points[i + 1])
+            final_images.append(img[:, lower_bound:upper_bound])
+            return final_images
+
     oversized_bounds = []
     for aw_point in aw_points:
         lower_bound = max([point for point in split_points if point < aw_point])
@@ -742,6 +758,8 @@ def fine_segmentation(img, split_points, aw_points):
         cropped_img = [img[:, lower_bound:upper_bound] < 0.9, lower_bound, upper_bound]
         cropped_images.append(cropped_img)
         skeleton = skeletonize(cropped_img[0])
+        plt.imshow(skeleton, cmap="gray")
+        plt.show()
         skeleton_images.append(skeleton)
 
     show_cropped_sections([img for img, _, _ in cropped_images])

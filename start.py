@@ -1,15 +1,14 @@
 import datetime
 import os
 import random
-import sys
 import easyocr
-import json
 import jaconv
 import cv2
 import numpy as np
-from numpyencoder import NumpyEncoder
+import OHTR
 from PIL import Image
-from OHTR import get_average_height, average_SWT
+import glob
+
 
 def generate_job_number():
     prefix = "JOB"
@@ -62,8 +61,6 @@ def OCR_easy(input_file, job_number):
         word = text[1]
         word = jaconv.normalize(word)
         word = word.replace("-", "一")
-        print(word)
-        conf = text[2]
 
         # Get bounding box
         left = min(point[0] for point in bbox)
@@ -80,7 +77,7 @@ def OCR_easy(input_file, job_number):
 
         # Binarise and filter word for processing
         cropped_word = cv2.cvtColor(cropped_word, cv2.COLOR_BGR2GRAY)
-        cropped_word = cv2.adaptiveThreshold(cropped_word,255,cv2.ADAPTIVE_THRESH_GAUSSIAN_C,cv2.THRESH_BINARY,21,25)
+        cropped_word = cv2.adaptiveThreshold(cropped_word, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 21, 25)
 
         # Crop image to remove any borders
         borders = find_borders(cropped_word, 85)
@@ -97,13 +94,37 @@ def OCR_easy(input_file, job_number):
     inpainted_image = cv2.inpaint(image, mask, inpaintRadius=0, flags=cv2.INPAINT_TELEA)
     cv2.imwrite(f"Archive/{job_number}/full/output_base.png", inpainted_image)
 
+
 if __name__ == "__main__":
     job_number = generate_job_number()
     print(f"Starting job {job_number}...")
     path = f"Archive/{job_number}"
     os.makedirs(path, exist_ok=True)
 
-    input_file = "input_image.jpeg"
+    input_file = "./images/input_image.jpeg"
     OCR_easy(input_file, job_number)
+
+    clean_path = os.path.join(path, "clean")
+    print(clean_path)
+    image_extensions = ['*.png', '*.jpg', '*.jpeg']
+    clean_images = []
+    for ext in image_extensions:
+        clean_images.extend(glob.glob(os.path.join(clean_path, ext)))
+    print(clean_images)
+
+    for image in clean_images:
+        raw_img = OHTR.open_grayscale(image)
+        raw_img = OHTR.remove_space(raw_img, round(raw_img.shape[1] * 0.05))
+        split_points, aw_points = OHTR.coarse_segmentation(raw_img, True)
+        output = OHTR.fine_segmentation(raw_img, split_points, aw_points)
+        output = [img * 255 for img in output]
+
+        for i, img in enumerate(output):
+            word = image.split("/")[-1].split(".")[0].split("_")[-1]
+            character = word[i]
+            output_file = f"output_{character}.png"
+            os.makedirs(f"Archive/{job_number}/full/{word}", exist_ok=True)
+            cv2.imwrite(f"Archive/{job_number}/full/{word}/{output_file}", img)
+            print(f"Saved {output_file}")
 
     print(f"Job {job_number} completed.")
